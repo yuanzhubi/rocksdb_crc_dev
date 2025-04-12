@@ -1223,6 +1223,47 @@ static uint32_t Crc32AppendZeroes(
   return crc;
 }
 
+#ifdef CRC32C_COMBINE_CACHE_SIZE
+static const uint32_t crc32c_gf_powers_table_cache_size = (CRC32C_COMBINE_CACHE_SIZE);
+
+template <uint32_t table_size>
+struct Crc32AppendZeroesHelper {
+  Crc32AppendZeroesHelper() {
+    multiplier[0] = 0;
+
+    for(uint32_t len_over_4 = 1; len_over_4 <= crc32c_gf_powers_table_cache_size; ++len_over_4)
+    {
+      //The result of X^31 mod the crc32c polynomial is 1 in galois-field.
+      //So we can use it to pre-compute the multiplier when we want to append zero.
+      uint32_t crc = 0x80000000;
+      multiplier[len_over_4] = Crc32AppendZeroes(crc, len_over_4, crc32c_m, crc32c_powers);
+    }
+  }
+
+  uint32_t AppendZero(uint32_t crc, size_t len_over_4) const {
+    if (len_over_4 > crc32c_gf_powers_table_cache_size) {
+      //Slow path
+      crc = Crc32AppendZeroes(crc, len_over_4, crc32c_m, crc32c_powers);
+    }
+    else if (len_over_4 != 0)
+    {
+      //O(1) quick path.
+      //For example, if len_over_4 = 1024+8+2 = 1034,
+      //Slow path is like crc *= X^2 *= X^8 *= X^1024, 
+      //while quick path is like crc *= X^1034 as we already store the multiplier[1034]
+      crc = gf_multiply_sw(crc, multiplier[len_over_4], crc32c_m);
+    }
+    return crc;
+  }
+  
+private:
+  uint32_t multiplier[crc32c_gf_powers_table_cache_size + 1];
+};
+
+const static Crc32AppendZeroesHelper<crc32c_gf_powers_table_cache_size> crc32c_append_zeroes_helper;
+
+#endif //CRC32C_COMBINE_CACHE_SIZE
+
 static inline uint32_t InvertedToPure(uint32_t crc) { return ~crc; }
 
 static inline uint32_t PureToInverted(uint32_t crc) { return ~crc; }
@@ -1288,8 +1329,12 @@ uint32_t Crc32cCombine(uint32_t crc1, uint32_t crc2, size_t crc2len) {
     tmp = PureExtend(tmp, zeros, len);
   }
   return PureToInverted(
-      Crc32AppendZeroes(tmp, crc2len / 4, crc32c_m, crc32c_powers) ^
-      pure_crc2_with_init);
+    #ifdef CRC32C_COMBINE_CACHE_SIZE
+      crc32c_append_zeroes_helper.AppendZero(tmp, crc2len / 4)
+    #else
+      Crc32AppendZeroes(tmp, crc2len / 4, crc32c_m, crc32c_powers) 
+    #endif //CRC32C_COMBINE_CACHE_SIZE
+        ^ pure_crc2_with_init);
 }
 
 }  // namespace ROCKSDB_NAMESPACE::crc32c

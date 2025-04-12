@@ -105,6 +105,9 @@ endif()
 
 include(CMakeDependentOption)
 
+if(CRC32C_COMBINE_CACHE_SIZE)
+  add_compile_definitions(CRC32C_COMBINE_CACHE_SIZE=${CRC32C_COMBINE_CACHE_SIZE})
+endif()
 if(MSVC)
   option(WITH_GFLAGS "build with GFlags" OFF)
   option(WITH_XPRESS "build with windows built in compression" OFF)
